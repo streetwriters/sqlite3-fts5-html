@@ -9,20 +9,18 @@
 **    May you share freely, never taking more than you give.
 **
 */
+#include "fts5-html.h"
 #include <ctype.h>
 #include <string.h>
 
-#ifdef SQLITE_OMIT_LOAD_EXTENSION
-#define SQLITE_OMIT_LOAD_EXTENSION_PREINCLUDE
-#endif
-
+#ifndef SQLITE_CORE
 #include "sqlite3ext.h"
 SQLITE_EXTENSION_INIT1
-
-#if defined(SQLITE_OMIT_LOAD_EXTENSION) && !defined(SQLITE_OMIT_LOAD_EXTENSION_PREINCLUDE)
-/* note: if you are on macOS - do not use included SQLite sqlite3ext.h */
-#error "The sqlite3ext.h header defines SQLITE_OMIT_LOAD_EXTENSION"
+#else
+#include "sqlite3.h"
 #endif
+
+#define UNUSED_PARAM(x) (void)(x)
 
 #ifndef SQLITE_PRIVATE
 #define SQLITE_PRIVATE static
@@ -2622,39 +2620,35 @@ static void fts5HtmlTokenizerDelete(Fts5Tokenizer *pTokenizer) {
 	sqlite3_free(p);
 }
 
-static int fts5ApiFromDb(sqlite3 *db, fts5_api **ppApi){
-	fts5_api *pRet = NULL;
-	sqlite3_stmt *pStmt = NULL;
-	int rc = SQLITE_OK;
+static fts5_api *fts5_api_from_db(sqlite3 *db) {
+  fts5_api *pRet = 0;
+  sqlite3_stmt *pStmt = 0;
 
-	rc = sqlite3_prepare(db, "SELECT fts5(?1)", -1, &pStmt, NULL);
-	if (rc != SQLITE_OK) {
-		return rc;
-	}
-
-	rc = sqlite3_bind_pointer(pStmt, 1, (void*)&pRet, "fts5_api_ptr", NULL);
-	if (rc != SQLITE_OK) {
-		goto finalize;
-	}
-
-	rc = sqlite3_step(pStmt);
-	if (rc != SQLITE_ROW) {
-		goto finalize;
-	}
-	rc = SQLITE_OK;
-
-finalize:
-	sqlite3_finalize(pStmt);
-	*ppApi = pRet;
-	return rc;
+  int version = sqlite3_libversion_number();
+  if (version >= 3020000) { // current api
+    if (SQLITE_OK == sqlite3_prepare(db, "SELECT fts5(?1)", -1, &pStmt, 0)) {
+      sqlite3_bind_pointer(pStmt, 1, (void *)&pRet, "fts5_api_ptr", NULL);
+      sqlite3_step(pStmt);
+    }
+    sqlite3_finalize(pStmt);
+  } else { // before 3.20
+    int rc = sqlite3_prepare(db, "SELECT fts5()", -1, &pStmt, 0);
+    if (rc == SQLITE_OK) {
+      if (SQLITE_ROW == sqlite3_step(pStmt) &&
+          sizeof(fts5_api *) == sqlite3_column_bytes(pStmt, 0)) {
+        memcpy(&pRet, sqlite3_column_blob(pStmt, 0), sizeof(fts5_api *));
+      }
+      sqlite3_finalize(pStmt);
+    }
+  }
+  return pRet;
 }
 
 static int fts5HtmlInit(sqlite3 *db) {
-	fts5_api *pApi = NULL;
-	int rc = SQLITE_OK;
-	rc = fts5ApiFromDb(db, &pApi);
-	if (rc != SQLITE_OK) {
-		return rc;
+    fts5_api *pApi;
+    pApi = fts5_api_from_db(db);
+	if (!pApi) {
+		return SQLITE_ERROR;
 	}
 
 	fts5_tokenizer tok = {
@@ -2666,17 +2660,17 @@ static int fts5HtmlInit(sqlite3 *db) {
 	return pApi->xCreateTokenizer(pApi, "html", (void *)pApi, &tok, NULL);
 }
 
-#ifndef SQLITE_CORE
-#ifdef _WIN32
-__declspec(dllexport)
-#endif
-int sqlite3_ftshtml_init(sqlite3 *db, char **pzErrMsg, const sqlite3_api_routines *pApi) {
-	SQLITE_EXTENSION_INIT2(pApi);
-	(void)pzErrMsg; /* unused */
-	return fts5HtmlInit(db);
+#ifdef SQLITE_CORE
+SQLITE_PRIVATE int sqlite3Fts5HtmlInit(sqlite3 *db) {
+  return fts5HtmlInit(db);
 }
 #else
-SQLITE_PRIVATE int sqlite3Fts5HtmlInit(sqlite3 *db) {
-	return fts5HtmlInit(db);
+SQLITE_FTS5_HTML_API int
+sqlite3_ftshtml_init(sqlite3 *db, char **error,
+                           const sqlite3_api_routines *api) {
+  SQLITE_EXTENSION_INIT2(api);
+  UNUSED_PARAM(error);
+
+  return fts5HtmlInit(db);
 }
 #endif

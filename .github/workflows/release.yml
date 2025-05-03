@@ -1,0 +1,252 @@
+name: "Release"
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+
+jobs:
+  build-linux-x86_64-extension:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: make loadable
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3-fts5-html-linux-x86_64-extension
+          path: dist/*
+  build-linux-aarch64-extension:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: korandoru/setup-zig@v1
+        with:
+          zig-version: 0.13.0 # released versions or master
+      - run: make CC="zig cc -target aarch64-linux-gnu" loadable
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3-fts5-html-linux-aarch64-extension
+          path: dist/*
+  build-macos-x86_64-extension:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - run: make loadable
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3-fts5-html-macos-x86_64-extension
+          path: dist/*
+  build-macos-aarch64-extension:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: make loadable
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3-fts5-html-macos-aarch64-extension
+          path: dist/*
+  build-windows-x86_64-extension:
+    runs-on: windows-2019
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - run: nmake /f Makefile.vc loadable
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3-fts5-html-windows-x86_64-extension
+          path: dist/*
+  build-windows-aarch64-extension:
+    runs-on: windows-2019
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64_arm64
+      - run: nmake /f Makefile.vc loadable
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3-fts5-html-windows-aarch64-extension
+          path: dist/*
+  build-android-extensions:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platforms:
+          [
+            { name: android-aarch64, cc: aarch64-linux-android21-clang },
+            { name: android-i686, cc: i686-linux-android21-clang },
+            { name: android-x86_64, cc: x86_64-linux-android21-clang },
+            { name: android-armv7a, cc: armv7a-linux-androideabi21-clang },
+          ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+      - uses: android-actions/setup-android@v3
+      - run: |
+          sdkmanager --install "ndk;27.0.12077973"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.0.12077973" >> $GITHUB_ENV
+      - run: |
+          ls $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/
+          ls $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
+      - run: |
+          export PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+          make CC=${{ matrix.platforms.cc }} \
+             AR=llvm-ar \
+             RANLIB=llvm-ranlib \
+             STRIP=llvm-strip loadable
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3-fts5-html-${{ matrix.platforms.name }}-extension
+          path: dist/*.so
+  build-ios-extensions:
+    runs-on: ${{ matrix.platforms.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platforms: [
+            {
+              name: ios-aarch64,
+              target: arm64-apple-ios,
+              sdk: iphoneos,
+              runner: macos-14,
+            },
+            #{
+            #  name: ios-x86_64,
+            #  target: x86_64-apple-ios,
+            #  sdk: iphoneos,
+            #  runner: macos-12,
+            #},
+            {
+              name: iossimulator-aarch64,
+              target: arm64-apple-ios-simulator,
+              sdk: iphonesimulator,
+              runner: macos-14,
+            },
+            {
+              name: iossimulator-x86_64,
+              target: x86_64-apple-ios-simulator,
+              sdk: iphonesimulator,
+              runner: macos-14,
+            },
+          ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - run: make CFLAGS="-target ${{ matrix.platforms.target }} -isysroot $(xcrun -sdk ${{ matrix.platforms.sdk }} --show-sdk-path) -fembed-bitcode -DNDEBUG=1" loadable
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3-fts5-html-${{ matrix.platforms.name }}-extension
+          path: dist/*
+
+  dist:
+    runs-on: ubuntu-latest
+    needs:
+      [
+        build-linux-x86_64-extension,
+        build-linux-aarch64-extension,
+        build-macos-x86_64-extension,
+        build-macos-aarch64-extension,
+        build-windows-x86_64-extension,
+        build-windows-aarch64-extension,
+        build-android-extensions,
+        build-ios-extensions,
+      ]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-linux-x86_64-extension
+          path: dist/linux-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-linux-aarch64-extension
+          path: dist/linux-aarch64
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-macos-x86_64-extension
+          path: dist/macos-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-macos-aarch64-extension
+          path: dist/macos-aarch64
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-windows-x86_64-extension
+          path: dist/windows-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-windows-aarch64-extension
+          path: dist/windows-aarch64
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-android-aarch64-extension
+          path: dist/android-aarch64
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-android-i686-extension
+          path: dist/android-i686
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-android-x86_64-extension
+          path: dist/android-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-android-armv7a-extension
+          path: dist/android-armv7a
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-android-armv7a-extension
+          path: dist/android-armv7a
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-ios-aarch64-extension
+          path: dist/ios-aarch64
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-iossimulator-aarch64-extension
+          path: dist/iossimulator-aarch64
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-iossimulator-x86_64-extension
+          path: dist/iossimulator-x86_64
+      - run: |
+          curl -L https://github.com/asg017/sqlite-dist/releases/download/v0.0.1-alpha.19/sqlite-dist-x86_64-unknown-linux-gnu.tar.xz \
+            | tar xfJ - --strip-components 1
+      - run: ./sqlite-dist ./sqlite-dist.toml --input dist/ --output distx/ --version $(cat VERSION)
+      - run: |
+          gh release upload --clobber ${{ github.ref_name }} \
+            distx/amalgamation/* \
+            distx/github_releases/* \
+            distx/checksums.txt \
+            distx/sqlite-dist-manifest.json \
+            distx/install.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Install node
+        uses: actions/setup-node@v3
+        with:
+          node-version: "16"
+          registry-url: "https://registry.npmjs.org"
+      - run: |
+          npm publish --access public distx/npm/sqlite3-fts5-html-darwin-arm64.tar.gz
+          npm publish --access public distx/npm/sqlite3-fts5-html-darwin-x64.tar.gz
+          npm publish --access public distx/npm/sqlite3-fts5-html-linux-x64.tar.gz
+          npm publish --access public distx/npm/sqlite3-fts5-html-linux-arm64.tar.gz
+          npm publish --access public distx/npm/sqlite3-fts5-html-windows-x64.tar.gz
+          npm publish --access public distx/npm/sqlite3-fts5-html-windows-arm64.tar.gz
+          npm publish --access public distx/npm/sqlite3-fts5-html.tar.gz
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
