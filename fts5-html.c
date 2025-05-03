@@ -2307,9 +2307,10 @@ static int fts5TokenizeCallback(
 	htmlEscape *e = p->pEscape;
 
 	int iActualStart = p->iOriginalCur;
-	if (p->iPlainCur > iStart) {
-		return SQLITE_ERROR;
-	}
+	// This breaks the trigram tokenizer
+	// if (p->iPlainCur > iStart) {
+	// 	return SQLITE_ERROR;
+	// }
 
 	for (int i = p->iPlainCur; i < iStart; i++) {
 		iActualStart += e->pLengths[i];
