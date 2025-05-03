@@ -31,7 +31,7 @@ function initDatabase() {
   return db;
 }
 
-describe("html", () => {
+describe("unicode61", () => {
   const db = initDatabase();
   afterAll(() => db.close());
 
@@ -120,7 +120,35 @@ describe("html", () => {
   for (const query in queries) {
     sqlTest(
       db,
-      `1.${i++}`,
+      `1.${i++}.${query}`,
+      `SELECT count(*) as res FROM test WHERE test MATCH '${query}'`,
+      [],
+      [queries[query]],
+    );
+  }
+});
+
+describe("trigram", () => {
+  const db = initDatabase();
+  afterAll(() => db.close());
+
+  test("1.0", () => {
+    [
+      `CREATE VIRTUAL TABLE test USING fts5(x, y, tokenize = 'html trigram remove_diacritics 1');`,
+      `INSERT INTO test VALUES('a', '<p block-id="hello">This domain is for use in illustrative examples in documents. You may use this</p>');`,
+    ].forEach((stmt) => db.query(stmt).run());
+  });
+
+  const queries = {
+    hello: 0,
+    domain: 1,
+    use: 1,
+  };
+  let i = 1;
+  for (const query in queries) {
+    sqlTest(
+      db,
+      `1.${i++}.${query}`,
       `SELECT count(*) as res FROM test WHERE test MATCH '${query}'`,
       [],
       [queries[query]],
