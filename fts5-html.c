@@ -11,6 +11,7 @@
 */
 #include "fts5-html.h"
 #include <ctype.h>
+#include <stdio.h>
 #include <string.h>
 
 #ifndef SQLITE_CORE
@@ -2307,10 +2308,17 @@ static int fts5TokenizeCallback(
 	htmlEscape *e = p->pEscape;
 
 	int iActualStart = p->iOriginalCur;
-	// This breaks the trigram tokenizer
-	// if (p->iPlainCur > iStart) {
-	// 	return SQLITE_ERROR;
-	// }
+
+	// if the cursor in plain text is ahead of the position
+	// shared by the actual tokenizer, that means we are moving
+	// by a different offset instead of from token to token.
+	// This is especially the case in trigram tokenizers that
+	// iterate over the same word multiple times, each time
+	// moving by offset 1.
+	if (p->iPlainCur > iStart) {
+	    // move back the cursor in the actual document
+		iActualStart = iActualStart - (p->iPlainCur - iStart);
+	}
 
 	for (int i = p->iPlainCur; i < iStart; i++) {
 		iActualStart += e->pLengths[i];

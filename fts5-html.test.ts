@@ -156,6 +156,26 @@ describe("trigram", () => {
   }
 });
 
+describe("highlight", () => {
+  const db = initDatabase();
+  afterAll(() => db.close());
+
+  test("1.0", () => {
+    [
+      `CREATE VIRTUAL TABLE test USING fts5(x, y, tokenize = 'html trigram remove_diacritics 1');`,
+      `INSERT INTO test VALUES('a', '<pre>describe(ContactFormComponent, () => {<br> let component:</pre>');`,
+    ].forEach((stmt) => db.query(stmt).run());
+  });
+
+  sqlTest(
+    db,
+    `1.1`,
+    `SELECT highlight(test, 1, '<b>', '</b>') as res FROM test WHERE test MATCH 'component'`,
+    [],
+    "<pre>describe(ContactForm<b>Component</b>, () => {<br> let <b>component</b>:</pre>",
+  );
+});
+
 function sqlTest(
   db: Database,
   version: string,
