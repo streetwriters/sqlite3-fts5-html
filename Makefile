@@ -6,7 +6,10 @@ SQLITE_SRC = deps/$(SQLITE_VERSION)/src
 SQLITE_AMALGAMATION_URL = https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
 SQLITE_AMALGAMATION_PATH = deps/sqlite-amalgamation-3490100
 
-override CFLAGS += -Ideps/$(SQLITE_VERSION)/ext/fts5 -I$(SQLITE_AMALGAMATION_PATH) -Ideps/lexbor/source -Ldeps/lexbor/build -Os -Wall -Wextra -llexbor_static
+LEXBOR_VERSION = v2.4.0
+LEXBOR_PATH = deps/lexbor
+
+override CFLAGS += -Ideps/$(SQLITE_VERSION)/ext/fts5 -I$(SQLITE_AMALGAMATION_PATH) -I$(LEXBOR_PATH)/source -Os -Wall -Wextra
 CONDITIONAL_CFLAGS = -lm
 
 UNAME_S := $(shell uname -s)
@@ -23,6 +26,7 @@ $(prefix):
 TARGET_LOADABLE=$(prefix)/fts5-html$(EXT)
 TARGET_FTS5=$(prefix)/fts5$(EXT)
 TARGET_LIBSQLITE=$(prefix)/libsqlite3$(EXT)
+TARGET_LEXBOR=$(LEXBOR_PATH)/build/liblexbor_static.a
 
 loadable: $(TARGET_LOADABLE)
 
@@ -41,8 +45,20 @@ $(SQLITE_AMALGAMATION_PATH):
 	unzip sqlite.zip -d deps/
 	rm -f sqlite.zip
 
-$(TARGET_LOADABLE): $(SQLITE_SRC) $(SQLITE_AMALGAMATION_PATH) $(prefix)
-	$(CC) $(CFLAGS) $(CONDITIONAL_CFLAGS) -shared -fPIC -o $@ fts5-html.c
+$(TARGET_LEXBOR):
+	mkdir -p deps
+	git clone --depth 1 --branch $(LEXBOR_VERSION) https://github.com/lexbor/lexbor.git $(LEXBOR_PATH)
+	cd $(LEXBOR_PATH) && \
+	cmake -B build \
+		-DLEXBOR_BUILD_STATIC=ON \
+		-DLEXBOR_BUILD_SHARED=OFF \
+		-DLEXBOR_BUILD_EXAMPLES=OFF \
+		-DLEXBOR_BUILD_TESTS=OFF \
+		-DLEXBOR_OPTIMIZATION_LEVEL=-O2 && \
+	cmake --build build --target lexbor_static
+
+$(TARGET_LOADABLE): $(SQLITE_SRC) $(SQLITE_AMALGAMATION_PATH) $(TARGET_LEXBOR) $(prefix)
+	$(CC) $(CFLAGS) $(CONDITIONAL_CFLAGS) -shared -fPIC -o $@ fts5-html.c $(TARGET_LEXBOR)
 
 $(TARGET_FTS5): $(SQLITE_SRC) $(SQLITE_AMALGAMATION_PATH) $(prefix)
 	dir=deps/$(SQLITE_VERSION) \

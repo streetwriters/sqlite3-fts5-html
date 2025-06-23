@@ -2654,8 +2654,7 @@ static lxb_html_token_t *tokenCallback(
     }
 
     /* Handle tag tokens */
-    lexbor_hash_t *tags = lxb_html_tokenizer_tags(tkz);
-    const lxb_char_t *name = lxb_tag_name_by_id(tags, token->tag_id, NULL);
+    const lxb_char_t *name = lxb_tag_name_by_id(token->tag_id, NULL);
 
     if (name == NULL) return token;  /* Skip if we can't get the tag name */
 
