@@ -160,7 +160,7 @@ describe("highlight", () => {
   const db = initDatabase();
   afterAll(() => db.close());
 
-  test("1.0", () => {
+  test("1.0", async () => {
     [
       `CREATE VIRTUAL TABLE test USING fts5(x, y, tokenize = 'html trigram remove_diacritics 1');`,
       `INSERT INTO test VALUES('a', '<pre>describe(ContactFormComponent, () => {<br> let component:</pre>');`,

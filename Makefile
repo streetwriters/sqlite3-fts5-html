@@ -6,7 +6,7 @@ SQLITE_SRC = deps/$(SQLITE_VERSION)/src
 SQLITE_AMALGAMATION_URL = https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
 SQLITE_AMALGAMATION_PATH = deps/sqlite-amalgamation-3490100
 
-override CFLAGS += -Ideps/$(SQLITE_VERSION)/ext/fts5 -I$(SQLITE_AMALGAMATION_PATH) -Os -Wall -Wextra
+override CFLAGS += -Ideps/$(SQLITE_VERSION)/ext/fts5 -I$(SQLITE_AMALGAMATION_PATH) -Ideps/lexbor/source -Ldeps/lexbor/build -Os -Wall -Wextra -llexbor_static
 CONDITIONAL_CFLAGS = -lm
 
 UNAME_S := $(shell uname -s)

@@ -27,6 +27,13 @@ SQLITE_EXTENSION_INIT1
 #define SQLITE_PRIVATE static
 #endif
 
+#include "lexbor/html/tokenizer.h"
+#include "lexbor/core/str.h"
+#include "lexbor/core/array.h"
+
+/* Maximum length of an HTML entity name */
+#define MAX_ENTITY_NAME_LENGTH 32
+
 /* START OF HTML ENTITIES */
 struct htmlEntity {
 	const char *pzName;
@@ -2164,471 +2171,690 @@ static const htmlEntity htmlEntities[] = {
 	{0, 0}
 };
 
-#define MAX_ENTITY_NAME_LENGTH 31
 #define NUM_ENTITIES 2125
 
 /* END OF HTML ENTITIES */
 
-static const htmlEntity *findEntity(const char *s, int len) {
-	int l = 0;
-	int r = NUM_ENTITIES - 1;
-	while (l <= r) {
-		int m = (l + r) / 2;
-		int cmp = strncmp(s, htmlEntities[m].pzName, len);
-		if (cmp == 0) {
-			return &htmlEntities[m];
-		} else if (cmp < 0) {
-			r = m - 1;
-		} else {
-			l = m + 1;
-		}
-	}
+/* Find an entity by name using binary search for better performance */
+static const htmlEntity *findEntity(const char *name, int nameLen) {
+    int left = 0;
+    int right = sizeof(htmlEntities) / sizeof(htmlEntities[0]) - 2; /* Exclude NULL terminator */
 
-	return NULL;
+    while (left <= right) {
+        int mid = (left + right) / 2;
+        int cmp = strncmp(name, htmlEntities[mid].pzName, nameLen);
+
+        if (cmp == 0) {
+            /* Check if we have an exact match or if the entity name is longer */
+            if (htmlEntities[mid].pzName[nameLen] == '\0') {
+                return &htmlEntities[mid];
+            }
+            /* If name is a prefix, we need to check adjacent entries as well */
+            int i = mid - 1;
+            while (i >= 0 && strncmp(name, htmlEntities[i].pzName, nameLen) == 0) {
+                if (htmlEntities[i].pzName[nameLen] == '\0') {
+                    return &htmlEntities[i];
+                }
+                i--;
+            }
+            i = mid + 1;
+            while (htmlEntities[i].pzName != NULL && strncmp(name, htmlEntities[i].pzName, nameLen) == 0) {
+                if (htmlEntities[i].pzName[nameLen] == '\0') {
+                    return &htmlEntities[i];
+                }
+                i++;
+            }
+
+            /* No exact match found */
+            return NULL;
+        } else if (cmp < 0) {
+            right = mid - 1;
+        } else {
+            left = mid + 1;
+        }
+    }
+
+    return NULL;
 }
 
-/* do not include void element here */
+/* Parse a codepoint from an HTML entity (e.g., "#123" or "#x123") */
+static int parseCodepoint(const char *s, int len) {
+    int code = 0;
+    const int MAX_CODEPOINT = 0x10FFFF; // Maximum valid Unicode codepoint
+
+    if (len < 1) {
+        return -1;
+    }
+    if (s[0] == 'x' || s[0] == 'X') {
+        /* Hex, e.g. &#x123; */
+        for (int i = 1; i < len; i++) {
+            char d = s[i];
+
+            // Check for potential overflow before multiplying
+            if (code > (MAX_CODEPOINT / 16))
+                return -1;
+
+            code *= 16;
+            if (d >= '0' && d <= '9') {
+                code += d - '0';
+            } else if (d >= 'a' && d <= 'f') {
+                code += d - 'a' + 10;
+            } else if (d >= 'A' && d <= 'F') {
+                code += d - 'A' + 10;
+            } else {
+                return -1;
+            }
+
+            // Check if we've exceeded max valid codepoint
+            if (code > MAX_CODEPOINT)
+                return -1;
+        }
+    } else {
+        /* Decimal, e.g. &#123; */
+        for (int i = 0; i < len; i++) {
+            char d = s[i];
+
+            // Check for potential overflow before multiplying
+            if (code > (MAX_CODEPOINT / 10))
+                return -1;
+
+            code *= 10;
+            if (d >= '0' && d <= '9') {
+                code += d - '0';
+            } else {
+                return -1;
+            }
+
+            // Check if we've exceeded max valid codepoint
+            if (code > MAX_CODEPOINT)
+                return -1;
+        }
+    }
+
+    // Filter out invalid and dangerous codepoints
+    if (code == 0 || (code >= 0xD800 && code <= 0xDFFF))
+        return -1;
+
+    return code;
+}
+
+
+/* List of tags to ignore in tokenization */
 static const char *azIgnoreTags[] = {
-	"canvas",
-	"math",
-	"noscript",
-	"object",
-	"script",
-	"style",
-	"svg",
-	"template",
-	NULL,
+    "canvas",
+    "math",
+    "noscript",
+    "object",
+    "script",
+    "style",
+    "svg",
+    "template",
+    NULL,
 };
 
-struct Fts5HtmlTokenizer {
-	fts5_tokenizer nextTok;
-	Fts5Tokenizer *pNextTokInst;
-};
-typedef struct Fts5HtmlTokenizer Fts5HtmlTokenizer;
+/* Structure to track positions in the original HTML */
+typedef struct {
+    const char *original;       /* Original HTML input */
+    int originalLength;         /* Length of original HTML input */
+    char *plain;                /* Plain text extracted from HTML */
+    int plainLen;               /* Length of plain text */
+    int plainCapacity;          /* Capacity of plain text buffer */
+    int *pStartPositions;       /* For each char in plain text, original start position */
+    int *pEndPositions;         /* For each char in plain text, original end position */
+    int inIgnoreTag;            /* Are we currently in an ignored tag? */
+    const char *currentTag;     /* Current tag being ignored, if any */
+    int lastOriginalPos;        /* Last position in the original text */
+    int inEntity;               /* Currently processing an entity */
+    char entityBuf[MAX_ENTITY_NAME_LENGTH + 4]; /* Buffer for entity name */
+    int entityLen;              /* Length of current entity in buffer */
+    int lastTextNode;           /* 1 if we've seen a text node before, to add space between nodes */
+    int needSpace;              /* 1 if we need to add a space before the next text */
+} Fts5HtmlContext;
 
-struct htmlEscape {
-	char *pLengths;
-	char *pPlain;
-	int n;
-};
-typedef struct htmlEscape htmlEscape;
+/* Fts5 tokenizer structure */
+typedef struct Fts5HtmlTokenizer {
+    fts5_tokenizer nextTok;
+    Fts5Tokenizer *pNextTokInst;
+} Fts5HtmlTokenizer;
 
-struct Fts5HtmlTokenizerContext {
-	int (*xToken)(
-		void *pCtx,
-		int tflags,
-		const char *pToken,
-		int nToken,
-		int iStart,
-		int iEnd
-	);
-	void *pCtx;
-	htmlEscape *pEscape;
+/* Structure to pass to token callback */
+typedef struct {
+    int (*xToken)(
+        void *pCtx,
+        int tflags,
+        const char *pToken,
+        int nToken,
+        int iStart,
+        int iEnd
+    );
+    void *pCtx;
+    Fts5HtmlContext *pHtmlCtx;
 
-	/* current position in the plain (unescaped) text, relative to the what is
-	 * passed to the xTokenize call to the next tokenizer
-	 */
-	int iPlainCur;
+    /* Current position tracking */
+    int iPlainCur;      /* Current position in plain text */
+    int iOriginalCur;   /* Current position in original text */
+} Fts5HtmlTokenizerContext;
 
-	/* current position in the original (html) text
-	 * this is relative to the original text passed to the xTokenize call to
-	 * this tokenizer
-	 */
-	int iOriginalCur;
-};
-typedef struct Fts5HtmlTokenizerContext Fts5HtmlTokenizerContext;
-
+/* Case-insensitive string comparison, like strcasecmp but with limited length */
 static inline int caseInsensitiveCompare(const char *a, const char *b, int n) {
-	for (int i = 0; i < n; i++) {
-		char ca = (char)tolower(a[i]);
-		char cb = (char)tolower(b[i]);
-		int diff = ca - cb;
-		if (diff != 0 || ca == '\0' || cb == '\0') {
-			return diff;
-		}
-	}
-	return 0;
+    for (int i = 0; i < n; i++) {
+        char ca = (char)tolower(a[i]);
+        char cb = (char)tolower(b[i]);
+        int diff = ca - cb;
+        if (diff != 0 || ca == '\0' || cb == '\0') {
+            return diff;
+        }
+    }
+    return 0;
 }
 
-static inline int hasPrefix(const char *p, int n, const char *prefix) {
-	int len = strlen(prefix);
-	if (n < len) {
-		return 0;
-	}
-	return strncmp(p, prefix, len) == 0;
+/* Initialize the HTML context for lexbor tokenization */
+static Fts5HtmlContext *fts5HtmlContextCreate(const char *html, int len) {
+    Fts5HtmlContext *ctx = sqlite3_malloc(sizeof(*ctx));
+    if (!ctx) return NULL;
+
+    memset(ctx, 0, sizeof(*ctx));
+
+    /* Initial capacity is input size + some extra space */
+    int initialCapacity = len + 64;
+
+    ctx->original = html;
+    ctx->originalLength = len;
+    ctx->plain = sqlite3_malloc(initialCapacity);
+    ctx->pStartPositions = sqlite3_malloc(initialCapacity * sizeof(int));
+    ctx->pEndPositions = sqlite3_malloc(initialCapacity * sizeof(int));
+
+    if (!ctx->plain || !ctx->pStartPositions || !ctx->pEndPositions) {
+        if (ctx->plain) sqlite3_free(ctx->plain);
+        if (ctx->pStartPositions) sqlite3_free(ctx->pStartPositions);
+        if (ctx->pEndPositions) sqlite3_free(ctx->pEndPositions);
+        sqlite3_free(ctx);
+        return NULL;
+    }
+
+    ctx->plainCapacity = initialCapacity;
+    ctx->plainLen = 0;
+    ctx->inIgnoreTag = 0;
+    ctx->currentTag = NULL;
+    ctx->lastOriginalPos = 0;
+    ctx->inEntity = 0;
+    ctx->entityLen = 0;
+    ctx->lastTextNode = 0;
+    ctx->needSpace = 0;
+
+    return ctx;
 }
 
-static int fts5HtmlTokenizerCreate(void *pCtx, const char **azArg, int nArg, Fts5Tokenizer **ppOut) {
-	int rc = SQLITE_OK;
-	fts5_api *pApi = (fts5_api*)pCtx;
-	Fts5HtmlTokenizer *pRet = NULL;
-	void *pTokCtx = NULL;
+/* Free the HTML context */
+static void fts5HtmlContextFree(Fts5HtmlContext *ctx) {
+    if (ctx) {
+        if (ctx->plain) sqlite3_free(ctx->plain);
+        if (ctx->pStartPositions) sqlite3_free(ctx->pStartPositions);
+        if (ctx->pEndPositions) sqlite3_free(ctx->pEndPositions);
+        sqlite3_free(ctx);
+    }
+}
 
-	if (nArg == 0) {
-		return SQLITE_MISUSE;
-	}
+/* Grow the plain text buffer if needed */
+static int fts5HtmlContextGrow(Fts5HtmlContext *ctx, int additionalSize) {
+    if (additionalSize <= 0 || additionalSize > (INT_MAX / 2))
+        return SQLITE_ERROR;
 
-	pRet = sqlite3_malloc(sizeof(*pRet));
-	if (pRet == NULL) {
-		rc = SQLITE_NOMEM;
-		goto error;
-	}
-	memset(pRet, 0, sizeof(*pRet));
+    if (ctx->plainLen + additionalSize >= ctx->plainCapacity) {
+        int newCapacity;
 
-	const char *nextTokName = azArg[0];
-	rc = pApi->xFindTokenizer(pApi, nextTokName, &pTokCtx, &pRet->nextTok);
-	if (rc != SQLITE_OK) {
-		goto error;
-	}
+        // Safe calculation to prevent integer overflow
+        if (ctx->plainCapacity > (INT_MAX / 2)) {
+            // Linear growth instead of exponential when close to INT_MAX
+            newCapacity = ctx->plainCapacity + (64 + additionalSize);
+        } else {
+            newCapacity = ctx->plainCapacity * 2;
+        }
 
-	rc = pRet->nextTok.xCreate(pTokCtx, azArg + 1, nArg - 1, &pRet->pNextTokInst);
-	if (rc != SQLITE_OK) {
-		goto error;
-	}
+        // Ensure we have enough space
+        if (newCapacity < ctx->plainLen + additionalSize + 64) {
+            // Check for potential overflow
+            if ((INT_MAX - 64) < (ctx->plainLen + additionalSize))
+                return SQLITE_NOMEM;
 
-	*ppOut = (Fts5Tokenizer*)pRet;
-	return SQLITE_OK;
+            newCapacity = ctx->plainLen + additionalSize + 64;
+        }
+
+        char *newPlain = sqlite3_realloc(ctx->plain, newCapacity);
+        int *newStartPositions = sqlite3_realloc(ctx->pStartPositions, newCapacity * sizeof(int));
+        int *newEndPositions = sqlite3_realloc(ctx->pEndPositions, newCapacity * sizeof(int));
+
+        if (!newPlain || !newStartPositions || !newEndPositions) {
+            sqlite3_free(newPlain);  /* sqlite3_realloc might have succeeded for one but failed for other */
+            sqlite3_free(newStartPositions);
+            sqlite3_free(newEndPositions);
+            return SQLITE_NOMEM;
+        }
+
+        ctx->plain = newPlain;
+        ctx->pStartPositions = newStartPositions;
+        ctx->pEndPositions = newEndPositions;
+        ctx->plainCapacity = newCapacity;
+    }
+
+    return SQLITE_OK;
+}
+
+/* Process and emit a single character to the plain text buffer */
+static int fts5HtmlContextAddChar(
+    Fts5HtmlContext *ctx,
+    char c,
+    int originalPos,
+    int originalLen
+) {
+    // Don't allow null bytes to be added to the plain text
+    if (c == '\0') return SQLITE_OK;  // Skip null bytes silently
+    if (ctx->inIgnoreTag) return SQLITE_OK; /* Skip text in ignored tags */
+
+    int rc = fts5HtmlContextGrow(ctx, 1);
+    if (rc != SQLITE_OK) return rc;
+
+    /* Add the character */
+    ctx->plain[ctx->plainLen] = c;
+
+    /* Update position mapping */
+    ctx->pStartPositions[ctx->plainLen] = originalPos;
+    ctx->pEndPositions[ctx->plainLen] = originalPos + originalLen;
+
+    ctx->plainLen++;
+    ctx->lastOriginalPos = originalPos + originalLen;
+
+    return SQLITE_OK;
+}
+
+#define MAX_ENTITIES_PER_TOKEN 1000
+/* Process HTML entities in text */
+static int fts5HtmlContextProcessEntities(
+    Fts5HtmlContext *ctx,
+    const lxb_char_t *text,
+    size_t length,
+    int originalPos
+) {
+    if (ctx->inIgnoreTag) return SQLITE_OK; /* Skip text in ignored tags */
+
+    /* Check for empty text */
+    if (length == 0) return SQLITE_OK;
+
+    int rc = SQLITE_OK;
+    const char *p = (const char *)text;
+    const char *end = p + length;
+    int pos = originalPos;
+    int entityCount = 0;
+
+    while (p < end) {
+        char c = *p;
+
+        if (ctx->inEntity) {
+            // Add protection against too many entities in a single token
+            if (++entityCount > MAX_ENTITIES_PER_TOKEN) {
+                // Too many entities, stop processing to avoid DOS
+                ctx->inEntity = 0;
+                break;
+            }
+
+            if (!isalnum(c) && c != '#') {
+                /* End of entity name */
+                if (ctx->entityBuf[1] == '#') {
+                    /* Numeric entity: &#123; or &#x123; */
+                    int code = parseCodepoint(ctx->entityBuf + 2, ctx->entityLen - 2);
+
+                    if (code >= 0) {
+                        /* Convert to UTF-8 */
+                        if (code < 0x80) {
+                            rc = fts5HtmlContextAddChar(ctx, (char)code, originalPos - ctx->entityLen, ctx->entityLen + (c == ';' ? 1 : 0));
+                            if (rc != SQLITE_OK) return rc;
+                        } else if (code < 0x800) {
+                            rc = fts5HtmlContextAddChar(ctx, (char)(0xC0 | (code >> 6)),
+                                originalPos - ctx->entityLen, ctx->entityLen + (c == ';' ? 1 : 0));
+                            if (rc != SQLITE_OK) return rc;
+                            rc = fts5HtmlContextAddChar(ctx, (char)(0x80 | (code & 0x3F)),
+                                originalPos - ctx->entityLen, 0);
+                            if (rc != SQLITE_OK) return rc;
+                        } else if (code < 0x10000) {
+                            rc = fts5HtmlContextAddChar(ctx, (char)(0xE0 | (code >> 12)),
+                                originalPos - ctx->entityLen, ctx->entityLen + (c == ';' ? 1 : 0));
+                            if (rc != SQLITE_OK) return rc;
+                            rc = fts5HtmlContextAddChar(ctx, (char)(0x80 | ((code >> 6) & 0x3F)),
+                                originalPos - ctx->entityLen, 0);
+                            if (rc != SQLITE_OK) return rc;
+                            rc = fts5HtmlContextAddChar(ctx, (char)(0x80 | (code & 0x3F)),
+                                originalPos - ctx->entityLen, 0);
+                            if (rc != SQLITE_OK) return rc;
+                        } else {
+                            /* Surrogate pair - rarely used in HTML */
+                            rc = fts5HtmlContextAddChar(ctx, (char)(0xF0 | (code >> 18)),
+                                originalPos - ctx->entityLen, ctx->entityLen + (c == ';' ? 1 : 0));
+                            if (rc != SQLITE_OK) return rc;
+                            rc = fts5HtmlContextAddChar(ctx, (char)(0x80 | ((code >> 12) & 0x3F)),
+                                originalPos - ctx->entityLen, 0);
+                            if (rc != SQLITE_OK) return rc;
+                            rc = fts5HtmlContextAddChar(ctx, (char)(0x80 | ((code >> 6) & 0x3F)),
+                                originalPos - ctx->entityLen, 0);
+                            if (rc != SQLITE_OK) return rc;
+                            rc = fts5HtmlContextAddChar(ctx, (char)(0x80 | (code & 0x3F)),
+                                originalPos - ctx->entityLen, 0);
+                            if (rc != SQLITE_OK) return rc;
+                        }
+                    }
+                } else {
+                    /* Named entity: &amp; */
+                    const htmlEntity *entity = findEntity(ctx->entityBuf + 1, ctx->entityLen - 1);
+                    if (entity != NULL) {
+                        const char *pEntity = entity->pzUtf8;
+                        int entityPos = originalPos - ctx->entityLen;
+                        int entityLen = ctx->entityLen + (c == ';' ? 1 : 0);
+                        while (*pEntity != '\0') {
+                            rc = fts5HtmlContextAddChar(ctx, *pEntity, entityPos, entityLen);
+                            if (rc != SQLITE_OK) return rc;
+                            pEntity++;
+                            /* Only the first char maps to the full entity */
+                            entityLen = 0;
+                        }
+                    }
+                }
+
+                if (c != ';') {
+                    /* Unclosed entity - emit the character */
+                    rc = fts5HtmlContextAddChar(ctx, '&', pos - 1, 1);
+                    rc = fts5HtmlContextAddChar(ctx, c, pos, 1);
+                    if (rc != SQLITE_OK) return rc;
+                }
+
+                ctx->inEntity = 0;
+                ctx->entityLen = 0;
+            } else {
+                if (ctx->entityLen < MAX_ENTITY_NAME_LENGTH) {
+                    ctx->entityBuf[ctx->entityLen++] = c;
+                }
+            }
+        } else if (c == '&') {
+            /* Start of entity */
+            ctx->inEntity = 1;
+            ctx->entityLen = 0;
+            ctx->entityBuf[ctx->entityLen++] = c;
+        } else {
+            /* Regular character */
+            rc = fts5HtmlContextAddChar(ctx, c, pos, 1);
+            if (rc != SQLITE_OK) return rc;
+        }
+
+        p++;
+        pos++;
+    }
+
+    return SQLITE_OK;
+}
+
+/* List of HTML block-level elements that should cause whitespace to be inserted */
+static const char *azBlockElements[] = {
+    "address", "article", "aside", "blockquote", "details", "dialog",
+    "dd", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer",
+    "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hgroup", "hr",
+    "li", "main", "nav", "ol", "p", "pre", "section", "table", "ul",
+    NULL
+};
+
+/* Check if a tag is a block-level element */
+static int isBlockElement(const char *tagName, int tagLen) {
+    if (!tagName || tagLen <= 0) return 0;
+
+    for (int i = 0; azBlockElements[i] != NULL; i++) {
+        if (caseInsensitiveCompare(tagName, azBlockElements[i], tagLen) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*  token callback function */
+static lxb_html_token_t *tokenCallback(
+    lxb_html_tokenizer_t *tkz,
+    lxb_html_token_t *token,
+    void *ctx
+) {
+    Fts5HtmlContext *context = (Fts5HtmlContext *)ctx;
+    bool is_close = token->type & LXB_HTML_TOKEN_TYPE_CLOSE;
+
+    /* Handle the EOF token */
+    if (token->tag_id == LXB_TAG__END_OF_FILE) {
+        return token;
+    }
+
+    /* Handle text tokens */
+    if (token->tag_id == LXB_TAG__TEXT) {
+        if (!context->inIgnoreTag) {
+            int originalPos = token->begin - (const lxb_char_t *)context->original;
+
+            /* Check if we need to add a space (from previous node or block element) */
+            if ((context->needSpace || context->lastTextNode) && context->plainLen > 0) {
+                /* Only add space if the last character isn't already a space */
+                if (context->plain[context->plainLen-1] != ' ') {
+                    fts5HtmlContextAddChar(context, ' ', originalPos, 0);
+                }
+                context->needSpace = 0;
+            }
+
+            fts5HtmlContextProcessEntities(context, token->begin, token->end - token->begin, originalPos);
+            context->lastTextNode = 1;
+        }
+        return token;
+    }
+
+    /* Handle HTML comments - they should cause space between adjacent text nodes */
+    if (token->tag_id == LXB_TAG__EM_COMMENT) {
+        if (!context->inIgnoreTag && context->lastTextNode) {
+            context->needSpace = 1;
+        }
+        return token;
+    }
+
+    /* Handle tag tokens */
+    lexbor_hash_t *tags = lxb_html_tokenizer_tags(tkz);
+    const lxb_char_t *name = lxb_tag_name_by_id(tags, token->tag_id, NULL);
+
+    if (name == NULL) return token;  /* Skip if we can't get the tag name */
+
+    size_t name_len = strlen((const char *)name);
+
+    /* Check if we're entering an ignored tag */
+    if (!is_close && !context->inIgnoreTag) {
+        for (int i = 0; azIgnoreTags[i] != NULL; i++) {
+            if (caseInsensitiveCompare((const char *)name, azIgnoreTags[i], name_len) == 0) {
+                context->inIgnoreTag = 1;
+                context->currentTag = azIgnoreTags[i];
+                break;
+            }
+        }
+
+        /* Handle block-level elements - they should add whitespace */
+        if (isBlockElement((const char *)name, name_len)) {
+            if (context->lastTextNode && context->plainLen > 0) {
+                context->needSpace = 1;
+            }
+        }
+    }
+    /* Check if we're exiting an ignored tag */
+    else if (is_close && context->inIgnoreTag && context->currentTag) {
+        if (caseInsensitiveCompare((const char *)name, context->currentTag, name_len) == 0) {
+            context->inIgnoreTag = 0;
+            context->currentTag = NULL;
+        }
+    }
+    /* Handle closing block elements */
+    else if (is_close && isBlockElement((const char *)name, name_len)) {
+        context->needSpace = 1;
+    }
+
+    return token;
+}
+
+/* Create the lexbor-based FTS5 tokenizer */
+static int fts5HtmlTokenizerCreate(
+    void *pCtx,
+    const char **azArg,
+    int nArg,
+    Fts5Tokenizer **ppOut
+) {
+    int rc = SQLITE_OK;
+    fts5_api *pApi = (fts5_api *)pCtx;
+    Fts5HtmlTokenizer *pRet = NULL;
+    void *pTokCtx = NULL;
+
+    if (nArg == 0) {
+        return SQLITE_MISUSE;
+    }
+
+    pRet = sqlite3_malloc(sizeof(*pRet));
+    if (pRet == NULL) {
+        rc = SQLITE_NOMEM;
+        goto error;
+    }
+    memset(pRet, 0, sizeof(*pRet));
+
+    const char *nextTokName = azArg[0];
+    rc = pApi->xFindTokenizer(pApi, nextTokName, &pTokCtx, &pRet->nextTok);
+    if (rc != SQLITE_OK) {
+        goto error;
+    }
+
+    rc = pRet->nextTok.xCreate(pTokCtx, azArg + 1, nArg - 1, &pRet->pNextTokInst);
+    if (rc != SQLITE_OK) {
+        goto error;
+    }
+
+    *ppOut = (Fts5Tokenizer *)pRet;
+    return SQLITE_OK;
 
 error:
-	if (pRet != NULL) {
-		sqlite3_free(pRet);
-	}
-	return rc;
+    if (pRet != NULL) {
+        sqlite3_free(pRet);
+    }
+    return rc;
 }
 
+/* Tokenize callback for the next tokenizer - maps positions in plain text back to HTML positions */
 static int fts5TokenizeCallback(
-	void *pCtx,
-	int tflags,
-	const char *pToken,
-	int nToken,
-	int iStart,
-	int iEnd
+    void *pCtx,
+    int tflags,
+    const char *pToken,
+    int nToken,
+    int iStart,
+    int iEnd
 ) {
-	Fts5HtmlTokenizerContext *p = (Fts5HtmlTokenizerContext*)pCtx;
-	htmlEscape *e = p->pEscape;
+    Fts5HtmlTokenizerContext *p = (Fts5HtmlTokenizerContext *)pCtx;
+    Fts5HtmlContext *html = p->pHtmlCtx;
 
-	int iActualStart = p->iOriginalCur;
+    // Improved bounds checking
+    if (iStart < 0 || iStart >= html->plainLen || iEnd <= 0 || iEnd > html->plainLen || iEnd <= iStart) {
+        /* Invalid indices, just use current positions */
+        return p->xToken(p->pCtx, tflags, pToken, nToken, p->iOriginalCur, p->iOriginalCur + nToken);
+    }
 
-	// if the cursor in plain text is ahead of the position
-	// shared by the actual tokenizer, that means we are moving
-	// by a different offset instead of from token to token.
-	// This is especially the case in trigram tokenizers that
-	// iterate over the same word multiple times, each time
-	// moving by offset 1.
-	if (p->iPlainCur > iStart) {
-	    // move back the cursor in the actual document
-		iActualStart = iActualStart - (p->iPlainCur - iStart);
-	}
+    /* Direct position mapping - no need for complex calculations */
+    int iActualStart = html->pStartPositions[iStart];
+    int iActualEnd = html->pEndPositions[iEnd - 1];
 
-	for (int i = p->iPlainCur; i < iStart; i++) {
-		iActualStart += e->pLengths[i];
-	}
-	int iActualEnd = iActualStart;
-	for (int i = iStart; i < iEnd; i++) {
-		iActualEnd += e->pLengths[i];
-	}
-	p->iOriginalCur = iActualEnd;
-	p->iPlainCur = iEnd;
+    // Additional sanity check
+    if (iActualEnd < iActualStart) {
+        iActualEnd = iActualStart + nToken;
+    }
 
-	return p->xToken(p->pCtx, tflags, pToken, nToken, iActualStart, iActualEnd);
+    /* Update cursors */
+    p->iOriginalCur = iActualEnd;
+    p->iPlainCur = iEnd;
+
+    /* Pass the token and mapped positions to the original callback */
+    return p->xToken(p->pCtx, tflags, pToken, nToken, iActualStart, iActualEnd);
 }
 
-static int parseCodepoint(const char *s, int len) {
-	int code = 0;
-	if (len < 1) {
-		return -1;
-	}
-	if (s[0] == 'x' || s[0] == 'X') {
-		/* hex, e.g. &#x123; */
-		for (int i = 1; i < len; i++) {
-			char d = s[i];
-			code *= 16;
-			if (d >= '0' && d <= '9') {
-				code += d - '0';
-			} else if (d >= 'a' && d <= 'f') {
-				code += d - 'a' + 10;
-			} else if (d >= 'A' && d <= 'F') {
-				code += d - 'A' + 10;
-			} else {
-				return -1;
-			}
-		}
-	} else {
-		/* decimal, e.g. &#123; */
-		for (int i = 0; i < len; i++) {
-			char d = s[i];
-			code *= 10;
-			if (d >= '0' && d <= '9') {
-				code += d - '0';
-			} else {
-				return -1;
-			}
-		}
-	}
-	return code;
-}
-
-static void htmlEscapeFree(htmlEscape *p) {
-	if (p != NULL) {
-		if (p->pLengths != NULL) {
-			sqlite3_free(p->pLengths);
-		}
-		if (p->pPlain != NULL) {
-			sqlite3_free(p->pPlain);
-		}
-		sqlite3_free(p);
-	}
-}
-
-static int htmlUnescape(const char *s, int len, htmlEscape **pOutEscape) {
-	if (len <= 0) {
-		*pOutEscape = NULL;
-		return SQLITE_OK;
-	}
-	int bufLen = len + 16;
-
-	int rc = SQLITE_OK;
-	htmlEscape *e = sqlite3_malloc(sizeof(*e));
-	if (e == NULL) {
-		rc = SQLITE_NOMEM;
-		goto end;
-	}
-	memset(e, 0, sizeof(*e));
-
-	e->pLengths = sqlite3_malloc(bufLen);
-	if (e->pLengths == NULL) {
-		rc = SQLITE_NOMEM;
-		goto end;
-	}
-	memset(e->pLengths, 0, bufLen);
-
-	e->pPlain = sqlite3_malloc(bufLen);
-	if (e->pPlain == NULL) {
-		rc = SQLITE_NOMEM;
-		goto end;
-	}
-	memset(e->pPlain, 0, bufLen);
-
-	const char *p = s;
-	const char *pEmit = s;
-
-	char *ep = e->pPlain;
-	char *el = e->pLengths;
-
-#define EMIT(c) do {\
-	if (ep >= e->pPlain + bufLen) {\
-		rc = SQLITE_ERROR;\
-		goto end;\
-	}\
-	*ep++ = c;\
-	*el++ = (p + 1) - pEmit;\
-	pEmit = p + 1;\
-} while (0)
-
-	unsigned long escaped = 0;
-	char buf[MAX_ENTITY_NAME_LENGTH + 4] = {0};
-
-	for (; p - s < len; p++) {
-		char c = *p;
-		if (escaped > 0) {
-			if (!isalnum(c) && c != '#') {
-				if (buf[1] == '#') {
-					/* numeric escape, buf: &#0000 or &#x0000 */
-					int code = parseCodepoint(buf + 2, escaped - 2);
-					/* assume code is a Unicode code point, encode into UTF-8 */
-					if (code < 0) {
-						/* invalid escape, */
-					} else if (code < 0x80) {
-						EMIT(code);
-					} else if (code < 0x800) {
-						EMIT(0xC0 | (code >> 6));
-						EMIT(0x80 | (code & 0x3F));
-					} else if (code < 0x10000) {
-						EMIT(0xE0 | (code >> 12));
-						EMIT(0x80 | ((code >> 6) & 0x3F));
-						EMIT(0x80 | (code & 0x3F));
-					} else if (code < 0x110000) {
-						EMIT(0xF0 | (code >> 18));
-						EMIT(0x80 | ((code >> 12) & 0x3F));
-						EMIT(0x80 | ((code >> 6) & 0x3F));
-						EMIT(0x80 | (code & 0x3F));
-					} else {
-						/* invalid escape, ignore */
-					}
-				} else {
-					/* named escape, buf: &amp; */
-					const htmlEntity *entity = findEntity(buf + 1, escaped - 1);
-					if (entity != NULL) {
-						const char *pEntity = entity->pzUtf8;
-						while (*pEntity != '\0') {
-							EMIT(*pEntity);
-							pEntity++;
-						}
-					} else {
-						/* invalid escape, ignore */
-					}
-				}
-				if (c != ';') {
-					/* unclosed entity */
-					EMIT(c);
-				}
-				escaped = 0;
-			} else {
-				if (escaped < sizeof(buf)) {
-					buf[escaped++] = c;
-				}
-			}
-		} else {
-			/* not escaped */
-			if (c == '&') {
-				escaped = 0;
-				memset(buf, 0, sizeof(buf));
-				buf[escaped++] = c;
-			} else {
-				EMIT(c);
-			}
-		}
-	}
-
-	e->n = ep - e->pPlain;
-
-	*pOutEscape = e;
-	return rc;
-
-#undef EMIT
-end:
-	htmlEscapeFree(e);
-
-	*pOutEscape = e;
-	return rc;
-}
-
+/* Tokenize HTML content */
 static int fts5HtmlTokenizerTokenize(
-	Fts5Tokenizer *pTokenizer,
-	void *pCtx,
-	int flags,
-	const char *pText,
-	int nText,
-	int (*xToken)(
-		void *pCtx,
-		int tflags,
-		const char *pToken,
-		int nToken,
-		int iStart,
-		int iEnd
-	)
+    Fts5Tokenizer *pTokenizer,
+    void *pCtx,
+    int flags,
+    const char *pText,
+    int nText,
+    int (*xToken)(void *pCtx, int tflags, const char *pToken, int nToken, int iStart, int iEnd)
 ) {
-	int rc;
-	Fts5HtmlTokenizer *p = (Fts5HtmlTokenizer*)pTokenizer;
+    int rc = SQLITE_OK;
+    Fts5HtmlTokenizer *p = (Fts5HtmlTokenizer *)pTokenizer;
 
-	// states
-	const char *pzCurIgnoreTag = NULL;
+    /* Create lexbor tokenizer */
+    lxb_html_tokenizer_t *tkz = lxb_html_tokenizer_create();
+    lxb_status_t status = lxb_html_tokenizer_init(tkz);
+    if (status != LXB_STATUS_OK) {
+        lxb_html_tokenizer_destroy(tkz);
+        return SQLITE_ERROR;
+    }
 
-	// iterate over the tokens
-	const char *pPrev = pText;
-	const char *pCur = pText;
-	const char *pEnd = pText + nText;
+    /* Create HTML context */
+    Fts5HtmlContext *htmlCtx = fts5HtmlContextCreate(pText, nText);
+    if (!htmlCtx) {
+        lxb_html_tokenizer_destroy(tkz);
+        return SQLITE_NOMEM;
+    }
 
-	while (1) {
+    /* Set the token callback */
+    lxb_html_tokenizer_callback_token_done_set(tkz, tokenCallback, htmlCtx);
 
-#define STEP(n) do {\
-	if (pCur + n >= pEnd) { \
-		return SQLITE_OK; \
-	} \
-	pCur += n; \
-} while (0)
+    /* Tokenize the HTML */
+    status = lxb_html_tokenizer_begin(tkz);
+    if (status != LXB_STATUS_OK) {
+        rc = SQLITE_ERROR;
+        goto cleanup;
+    }
 
-		/* find the next tag */
-		while (*pCur != '<' && pCur < pEnd) {
-			pCur++;
-		}
+    status = lxb_html_tokenizer_chunk(tkz, (const lxb_char_t *)pText, nText);
+    if (status != LXB_STATUS_OK) {
+        rc = SQLITE_ERROR;
+        goto cleanup;
+    }
 
-		/* current is '<' or end of text */
-		if (pzCurIgnoreTag == NULL && pCur > pPrev) {
-			htmlEscape *pEscape = NULL;
-			rc = htmlUnescape(pPrev, pCur - pPrev, &pEscape);
-			if (rc != SQLITE_OK) {
-				return rc;
-			}
-			Fts5HtmlTokenizerContext ctx = {
-				.xToken = xToken,
-				.pCtx = pCtx,
-				.pEscape = pEscape,
-				.iPlainCur = 0,
-				.iOriginalCur = pPrev - pText,
-			};
-			/* emit the text token */
-			rc = p->nextTok.xTokenize(p->pNextTokInst, &ctx, flags, pEscape->pPlain, pEscape->n, fts5TokenizeCallback);
-			htmlEscapeFree(pEscape);
-			if (rc != SQLITE_OK) {
-				return rc;
-			}
-		}
-		STEP(1);
+    status = lxb_html_tokenizer_end(tkz);
+    if (status != LXB_STATUS_OK) {
+        rc = SQLITE_ERROR;
+        goto cleanup;
+    }
 
-		/* check for comment */
-		if (hasPrefix(pCur, pEnd - pCur, "!--")) {
-			STEP(3);
-			while (!hasPrefix(pCur, pEnd - pCur, "-->")) {
-				STEP(1);
-			}
-			STEP(3);
-			continue;
-		}
+    /* Set up the tokenizer context for the next tokenizer */
+    Fts5HtmlTokenizerContext ctx = {
+        .xToken = xToken,
+        .pCtx = pCtx,
+        .pHtmlCtx = htmlCtx,
+        .iPlainCur = 0,
+        .iOriginalCur = 0,
+    };
 
-		/* parse the tag */
-		int iTagType = 0; /* 0: self-closing, 1: start tag, 2: end tag */
-		const char *pTagName;
-		int nTagName;
-		if (*pCur == '/') { /* </... */
-			iTagType = 2;
-			STEP(1);
-		} else {
-			iTagType = 1;
-		}
-		pTagName = pCur;
-		while (!isspace(*pCur) && *pCur != '>') {
-			STEP(1);
-		}
-		nTagName = pCur - pTagName;
-		while (*pCur != '>') {
-			STEP(1);
-		}
-		if (*(pCur - 1) == '/') {
-			iTagType = 0;
-		}
+    /* Call the next tokenizer on the extracted plain text */
+    rc = p->nextTok.xTokenize(
+        p->pNextTokInst,
+        &ctx,
+        flags,
+        htmlCtx->plain,
+        htmlCtx->plainLen,
+        fts5TokenizeCallback
+    );
 
-		/* check if tag is ignored */
-		if (pzCurIgnoreTag == NULL && iTagType == 1) {
-			for (int i = 0; azIgnoreTags[i] != NULL; i++) {
-				if (caseInsensitiveCompare(pTagName, azIgnoreTags[i], nTagName) == 0) {
-					pzCurIgnoreTag = azIgnoreTags[i];
-					break;
-				}
-			}
-		} else if (pzCurIgnoreTag != NULL && iTagType == 2) {
-			if (caseInsensitiveCompare(pTagName, pzCurIgnoreTag, nTagName) == 0) {
-				pzCurIgnoreTag = NULL;
-			}
-		}
+cleanup:
+    lxb_html_tokenizer_destroy(tkz);
+    fts5HtmlContextFree(htmlCtx);
 
-		/* tag ended */
-		STEP(1);
-		pPrev = pCur;
-
-#undef STEP
-
-	}
-
-	return SQLITE_OK;
+    return rc;
 }
 
+/* Delete the tokenizer */
 static void fts5HtmlTokenizerDelete(Fts5Tokenizer *pTokenizer) {
-	Fts5HtmlTokenizer *p = (Fts5HtmlTokenizer*)pTokenizer;
-	p->nextTok.xDelete(p->pNextTokInst);
-	sqlite3_free(p);
+    Fts5HtmlTokenizer *p = (Fts5HtmlTokenizer *)pTokenizer;
+    p->nextTok.xDelete(p->pNextTokInst);
+    sqlite3_free(p);
 }
 
+/* Get FTS5 API from database handle */
 static fts5_api *fts5_api_from_db(sqlite3 *db) {
   fts5_api *pRet = 0;
   sqlite3_stmt *pStmt = 0;
@@ -2653,33 +2879,37 @@ static fts5_api *fts5_api_from_db(sqlite3 *db) {
   return pRet;
 }
 
+/* Initialize the lexbor-based HTML tokenizer with SQLite */
 static int fts5HtmlInit(sqlite3 *db) {
-    fts5_api *pApi;
-    pApi = fts5_api_from_db(db);
-	if (!pApi) {
-		return SQLITE_ERROR;
-	}
+    fts5_api *pApi = fts5_api_from_db(db);
+    if (!pApi) {
+        return SQLITE_ERROR;
+    }
 
-	fts5_tokenizer tok = {
-		.xCreate = fts5HtmlTokenizerCreate,
-		.xTokenize = fts5HtmlTokenizerTokenize,
-		.xDelete = fts5HtmlTokenizerDelete,
-	};
+    fts5_tokenizer tokenizer = {
+        fts5HtmlTokenizerCreate,
+        fts5HtmlTokenizerDelete,
+        fts5HtmlTokenizerTokenize
+    };
 
-	return pApi->xCreateTokenizer(pApi, "html", (void *)pApi, &tok, NULL);
+    return pApi->xCreateTokenizer(pApi,
+        "html",
+        (void*)pApi,
+        &tokenizer,
+        NULL
+    );
 }
 
+/* Register the lexbor-based HTML tokenizer with SQLite */
 #ifdef SQLITE_CORE
 SQLITE_PRIVATE int sqlite3Fts5HtmlInit(sqlite3 *db) {
-  return fts5HtmlInit(db);
+    return fts5HtmlInit(db);
 }
 #else
 SQLITE_FTS5_HTML_API int
-sqlite3_ftshtml_init(sqlite3 *db, char **error,
-                           const sqlite3_api_routines *api) {
-  SQLITE_EXTENSION_INIT2(api);
-  UNUSED_PARAM(error);
-
-  return fts5HtmlInit(db);
+sqlite3_ftshtml_init(sqlite3 *db, char **pzErrMsg, const sqlite3_api_routines *pApi) {
+    UNUSED_PARAM(pzErrMsg);
+    SQLITE_EXTENSION_INIT2(pApi);
+    return fts5HtmlInit(db);
 }
 #endif
