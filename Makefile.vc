@@ -57,6 +57,8 @@ $(LEXBOR_LIB):
     cd $(LEXBOR_PATH) && mkdir build
     cd $(LEXBOR_PATH)\build && cmake .. -DLEXBOR_BUILD_STATIC=ON -DLEXBOR_BUILD_SHARED=OFF -DLEXBOR_BUILD_EXAMPLES=OFF -DLEXBOR_BUILD_TESTS=OFF -DLEXBOR_OPTIMIZATION_LEVEL=-O2
     cd $(LEXBOR_PATH)\build && cmake --build . --target lexbor_static --config Release
+    @echo Finding lexbor .lib...
+    dir /s /b $(LEXBOR_PATH)\build
 
 $(TARGET_LOADABLE): $(SQLITE_AMALGAMATION_PATH) $(SQLITE_SRC) $(LEXBOR_LIB) $(prefix)
     cl $(CFLAGS) /LD /Fe$@ fts5-html.c $(LEXBOR_LIB)
