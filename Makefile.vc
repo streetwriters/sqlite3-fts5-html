@@ -11,7 +11,7 @@ TCLSH_PATH = deps\IronTcl\bin\tclsh86t.exe
 
 LEXBOR_VERSION = v2.4.0
 LEXBOR_PATH = deps\lexbor
-LEXBOR_LIB = $(LEXBOR_PATH)\build\lib\lexbor_static.lib
+LEXBOR_LIB = $(LEXBOR_PATH)\build\Release\lexbor_static.lib
 
 CFLAGS = -I$(SQLITE_AMALGAMATION_PATH) -Ideps\$(SQLITE_VERSION)\src -Ideps\$(SQLITE_VERSION)\ext\fts5 -I$(LEXBOR_PATH)\source -Os -Wall
 
@@ -54,12 +54,8 @@ $(LEXBOR_LIB):
     @echo Setting up Lexbor...
     if not exist deps mkdir deps
     git clone --depth 1 --branch $(LEXBOR_VERSION) https://github.com/lexbor/lexbor.git $(LEXBOR_PATH)
-    cd $(LEXBOR_PATH) && mkdir build && cd build && cmake .. ^
-        -DLEXBOR_BUILD_STATIC=ON ^
-        -DLEXBOR_BUILD_SHARED=OFF ^
-        -DLEXBOR_BUILD_EXAMPLES=OFF ^
-        -DLEXBOR_BUILD_TESTS=OFF ^
-        -DLEXBOR_OPTIMIZATION_LEVEL=/O2
+    cd $(LEXBOR_PATH) && mkdir build
+    cd $(LEXBOR_PATH)\build && cmake .. -DLEXBOR_BUILD_STATIC=ON -DLEXBOR_BUILD_SHARED=OFF -DLEXBOR_BUILD_EXAMPLES=OFF -DLEXBOR_BUILD_TESTS=OFF -DLEXBOR_OPTIMIZATION_LEVEL=-O2
     cd $(LEXBOR_PATH)\build && cmake --build . --target lexbor_static --config Release
 
 $(TARGET_LOADABLE): $(SQLITE_AMALGAMATION_PATH) $(SQLITE_SRC) $(LEXBOR_LIB) $(prefix)
