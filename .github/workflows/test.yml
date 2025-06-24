@@ -123,4 +123,4 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Run tests
-        run: make test
+        run: make ARCH=arm64 test
