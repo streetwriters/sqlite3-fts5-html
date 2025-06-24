@@ -69,7 +69,7 @@ $(TARGET_LOADABLE): $(SQLITE_AMALGAMATION_PATH) $(SQLITE_SRC) $(LEXBOR_LIB) $(pr
     cl $(CFLAGS) /LD /Fe$@ fts5-html.c $(LEXBOR_LIB) /link /LIBPATH:$(LEXBOR_PATH)\build
 
 $(TARGET_LEMON): $(SQLITE_SRC) $(prefix)
-    cl /arch x64 deps\$(SQLITE_VERSION)\tool\lemon.c /Fe$@
+    cl /arch:x64 deps\$(SQLITE_VERSION)\tool\lemon.c /Fe$@
     copy deps\$(SQLITE_VERSION)\tool\lempar.c $(prefix)\lempar.c
 
 $(TARGET_FTS5): $(TARGET_LEMON) $(TCLSH_PATH) $(SQLITE_SRC) $(SQLITE_AMALGAMATION_PATH) $(prefix)
