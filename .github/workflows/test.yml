@@ -61,6 +61,48 @@ jobs:
           arch: amd64_arm64
       - run: nmake /f Makefile.vc ARCH=ARM64 loadable
 
+  build-ios-extensions:
+    runs-on: ${{ matrix.platforms.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platforms: [
+            {
+              name: ios-aarch64,
+              target: arm64-apple-ios,
+              arch: arm64,
+              sdk: iphoneos,
+              runner: macos-14,
+            },
+            #{
+            #  name: ios-x86_64,
+            #  target: x86_64-apple-ios,
+            #  sdk: iphoneos,
+            #  runner: macos-12,
+            #},
+            {
+              name: iossimulator-aarch64,
+              target: arm64-apple-ios-simulator,
+              arch: arm64,
+              sdk: iphonesimulator,
+              runner: macos-14,
+            },
+            {
+              name: iossimulator-x86_64,
+              target: x86_64-apple-ios-simulator,
+              arch: x86_64,
+              sdk: iphonesimulator,
+              runner: macos-14,
+            },
+          ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - run: make CFLAGS="-target ${{ matrix.platforms.target }} -isysroot $(xcrun -sdk ${{ matrix.platforms.sdk }} --show-sdk-path) -fembed-bitcode -DNDEBUG=1 -DCMAKE_OSX_ARCHITECTURES=${{ matrix.platforms.arch }}" loadable
+
   test-macos:
     name: Test macOS
     runs-on: macos-latest
