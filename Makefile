@@ -50,6 +50,7 @@ $(TARGET_LEXBOR):
 	git clone --depth 1 --branch $(LEXBOR_VERSION) https://github.com/lexbor/lexbor.git $(LEXBOR_PATH)
 	cd $(LEXBOR_PATH) && \
 	cmake -B build \
+		-DCMAKE_C_FLAGS="$(CFLAGS)" \
 		-DLEXBOR_BUILD_STATIC=ON \
 		-DLEXBOR_BUILD_SHARED=OFF \
 		-DLEXBOR_BUILD_EXAMPLES=OFF \
