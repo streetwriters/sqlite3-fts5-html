@@ -52,14 +52,14 @@ jobs:
       - name: Run tests
         run: nmake /f Makefile.vc test
 
-  test-windows-aarch64:
+  build-windows-aarch64:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: amd64_arm64
-      - run: nmake /f Makefile.vc ARCH=ARM64 test
+      - run: nmake /f Makefile.vc ARCH=ARM64 loadable
 
   test-macos:
     name: Test macOS
