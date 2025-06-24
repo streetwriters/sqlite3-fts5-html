@@ -13,7 +13,7 @@ LEXBOR_VERSION = v2.4.0
 LEXBOR_PATH = deps\lexbor
 LEXBOR_LIB = $(LEXBOR_PATH)\build\Release\lexbor_static.lib
 
-CFLAGS = -I$(SQLITE_AMALGAMATION_PATH) -Ideps\$(SQLITE_VERSION)\src -Ideps\$(SQLITE_VERSION)\ext\fts5 -I$(LEXBOR_PATH)\source -Os -Wall -DLEXBOR_STATIC /MT
+CFLAGS = -I$(SQLITE_AMALGAMATION_PATH) -Ideps\$(SQLITE_VERSION)\src -Ideps\$(SQLITE_VERSION)\ext\fts5 -I$(LEXBOR_PATH)\source -Os -Wall -DLEXBOR_STATIC /MD
 
 prefix=dist
 $(prefix):
