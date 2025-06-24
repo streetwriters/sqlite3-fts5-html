@@ -16,7 +16,7 @@ LEXBOR_PATH = deps\lexbor
 ARCH = x64
 !ENDIF
 
-LEXBOR_LIB = $(LEXBOR_PATH)\build\$(ARCH)\Release\lexbor_static.lib
+LEXBOR_LIB = $(LEXBOR_PATH)\build\Release\lexbor_static.lib
 
 CFLAGS = -I$(SQLITE_AMALGAMATION_PATH) -Ideps\$(SQLITE_VERSION)\src -Ideps\$(SQLITE_VERSION)\ext\fts5 -I$(LEXBOR_PATH)\source -Os -Wall -DLEXBOR_STATIC /MD
 
@@ -60,13 +60,13 @@ $(LEXBOR_LIB):
     if not exist deps mkdir deps
     git clone --depth 1 --branch $(LEXBOR_VERSION) https://github.com/lexbor/lexbor.git $(LEXBOR_PATH)
     cd $(LEXBOR_PATH) && mkdir build
-    cd $(LEXBOR_PATH)\build && cmake .. -DLEXBOR_BUILD_STATIC=ON -DLEXBOR_BUILD_SHARED=OFF -DLEXBOR_BUILD_EXAMPLES=OFF -DLEXBOR_BUILD_TESTS=OFF -DLEXBOR_OPTIMIZATION_LEVEL=-O2 -A $(ARCH)
+    cd $(LEXBOR_PATH)\build && cmake .. -DLEXBOR_BUILD_STATIC=ON -DLEXBOR_BUILD_SHARED=OFF -DLEXBOR_BUILD_EXAMPLES=OFF -DLEXBOR_BUILD_TESTS=OFF -DLEXBOR_OPTIMIZATION_LEVEL=-O2 -DCMAKE_GENERATOR_PLATFORM=$(ARCH)
     cd $(LEXBOR_PATH)\build && cmake --build . --target lexbor_static --config Release
     @echo Finding lexbor .lib...
-    dir $(LEXBOR_PATH)\build\$(ARCH)\Release
+    dir $(LEXBOR_PATH)\build\Release
 
 $(TARGET_LOADABLE): $(SQLITE_AMALGAMATION_PATH) $(SQLITE_SRC) $(LEXBOR_LIB) $(prefix)
-    cl $(CFLAGS) /LD /Fe$@ fts5-html.c $(LEXBOR_LIB) /link /LIBPATH:$(LEXBOR_PATH)\build\$(ARCH)
+    cl $(CFLAGS) /LD /Fe$@ fts5-html.c $(LEXBOR_LIB) /link /LIBPATH:$(LEXBOR_PATH)\build
 
 $(TARGET_LEMON): $(SQLITE_SRC) $(prefix)
     cl deps\$(SQLITE_VERSION)\tool\lemon.c /Fe$@
