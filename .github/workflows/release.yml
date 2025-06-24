@@ -66,7 +66,7 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: amd64_arm64
-      - run: nmake /f Makefile.vc loadable
+      - run: nmake /f Makefile.vc ARCH=ARM64 loadable
       - uses: actions/upload-artifact@v4
         with:
           name: sqlite3-fts5-html-windows-aarch64-extension
@@ -114,6 +114,7 @@ jobs:
             {
               name: ios-aarch64,
               target: arm64-apple-ios,
+              arch: arm64,
               sdk: iphoneos,
               runner: macos-14,
             },
@@ -126,12 +127,14 @@ jobs:
             {
               name: iossimulator-aarch64,
               target: arm64-apple-ios-simulator,
+              arch: arm64,
               sdk: iphonesimulator,
               runner: macos-14,
             },
             {
               name: iossimulator-x86_64,
               target: x86_64-apple-ios-simulator,
+              arch: x86_64,
               sdk: iphonesimulator,
               runner: macos-14,
             },
@@ -142,7 +145,7 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - run: make CFLAGS="-target ${{ matrix.platforms.target }} -isysroot $(xcrun -sdk ${{ matrix.platforms.sdk }} --show-sdk-path) -fembed-bitcode -DNDEBUG=1" loadable
+      - run: make CFLAGS="-target ${{ matrix.platforms.target }} -isysroot $(xcrun -sdk ${{ matrix.platforms.sdk }} --show-sdk-path) -fembed-bitcode -DNDEBUG=1" ARCH=${{ matrix.platforms.arch }} loadable
       - uses: actions/upload-artifact@v4
         with:
           name: sqlite3-fts5-html-${{ matrix.platforms.name }}-extension
