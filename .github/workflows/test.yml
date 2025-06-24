@@ -101,7 +101,7 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - run: make CFLAGS="-target ${{ matrix.platforms.target }} -isysroot $(xcrun -sdk ${{ matrix.platforms.sdk }} --show-sdk-path) -fembed-bitcode -DNDEBUG=1 -DCMAKE_OSX_ARCHITECTURES=${{ matrix.platforms.arch }}" loadable
+      - run: make CFLAGS="-target ${{ matrix.platforms.target }} -isysroot $(xcrun -sdk ${{ matrix.platforms.sdk }} --show-sdk-path) -fembed-bitcode -DNDEBUG=1" ARCH=${{ matrix.platforms.arch }} loadable
 
   test-macos:
     name: Test macOS
