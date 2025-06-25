@@ -255,6 +255,7 @@ jobs:
         with:
           name: sqlite3-fts5-html-ios-xcframework
           path: ios-xcframework
+      - run: zip -r ios-xcframework.zip ios-xcframework
       - run: |
           curl -L https://github.com/asg017/sqlite-dist/releases/download/v0.0.1-alpha.19/sqlite-dist-x86_64-unknown-linux-gnu.tar.xz \
             | tar xfJ - --strip-components 1
@@ -266,7 +267,7 @@ jobs:
             distx/checksums.txt \
             distx/sqlite-dist-manifest.json \
             distx/install.sh \
-            ios-xcframework
+            ios-xcframework.zip
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Install node
