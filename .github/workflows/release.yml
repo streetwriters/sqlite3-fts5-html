@@ -170,11 +170,11 @@ jobs:
           path: dist/iossimulator-x86_64
       - run: |
           lipo -create dist/iossimulator-aarch64/fts5-html.dylib dist/iossimulator-x86_64/fts5-html.dylib -output fts5-html-simfat.dylib
-          xcodebuild -create-xcframework -library dist/ios-aarch64/fts5-html.dylib -library fts5-html-simfat.dylib -output Fts5Html.xcframework
+          xcodebuild -create-xcframework -library dist/ios-aarch64/fts5-html.dylib -library fts5-html-simfat.dylib -output dist/Fts5Html.xcframework
       - uses: actions/upload-artifact@v4
         with:
           name: sqlite3-fts5-html-ios-xcframework
-          path: Fts5Html.xcframework
+          path: dist/*
 
   dist:
     runs-on: ubuntu-latest
