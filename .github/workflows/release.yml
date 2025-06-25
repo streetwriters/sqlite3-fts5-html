@@ -169,8 +169,8 @@ jobs:
           name: sqlite3-fts5-html-iossimulator-x86_64-extension
           path: dist/iossimulator-x86_64
       - run: |
-          lipo -create dist/iossimulator-aarch64/fts5-html.dylib dist/iossimulator-x86_64/fts5-html.dylib -output fts5-html-simfat.dylib
-          xcodebuild -create-xcframework -library dist/ios-aarch64/fts5-html.dylib -library fts5-html-simfat.dylib -output dist/Fts5Html.xcframework
+          lipo -create dist/iossimulator-aarch64/fts5-html.dylib dist/iossimulator-x86_64/fts5-html.dylib -output fts5-html.dylib
+          xcodebuild -create-xcframework -library dist/ios-aarch64/fts5-html.dylib -library fts5-html.dylib -output dist/Fts5Html.xcframework
       - uses: actions/upload-artifact@v4
         with:
           name: sqlite3-fts5-html-ios-xcframework
@@ -266,7 +266,7 @@ jobs:
             distx/checksums.txt \
             distx/sqlite-dist-manifest.json \
             distx/install.sh \
-            ios-xcframework/*
+            ios-xcframework
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Install node
