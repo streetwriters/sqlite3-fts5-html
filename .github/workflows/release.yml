@@ -151,6 +151,31 @@ jobs:
           name: sqlite3-fts5-html-${{ matrix.platforms.name }}-extension
           path: dist/*
 
+  build-ios-xcframework:
+    runs-on: macos-14
+    needs: build-ios-extensions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-ios-aarch64-extension
+          path: dist/ios-aarch64
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-iossimulator-aarch64-extension
+          path: dist/iossimulator-aarch64
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-iossimulator-x86_64-extension
+          path: dist/iossimulator-x86_64
+      - run: |
+          lipo -create dist/iossimulator-aarch64/fts5-html.dylib dist/iossimulator-x86_64/fts5-html.dylib -output fts5-html-simfat.dylib
+          xcodebuild -create-xcframework -library dist/ios-aarch64/fts5-html.dylib -library fts5-html-simfat.dylib -output Fts5Html.xcframework
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3-fts5-html-ios-xcframework
+          path: Fts5Html.xcframework
+
   dist:
     runs-on: ubuntu-latest
     needs:
@@ -163,6 +188,7 @@ jobs:
         build-windows-aarch64-extension,
         build-android-extensions,
         build-ios-extensions,
+        build-ios-xcframework,
       ]
     permissions:
       contents: write
@@ -225,6 +251,10 @@ jobs:
         with:
           name: sqlite3-fts5-html-iossimulator-x86_64-extension
           path: dist/iossimulator-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite3-fts5-html-ios-xcframework
+          path: dist/ios-xcframework
       - run: |
           curl -L https://github.com/asg017/sqlite-dist/releases/download/v0.0.1-alpha.19/sqlite-dist-x86_64-unknown-linux-gnu.tar.xz \
             | tar xfJ - --strip-components 1
@@ -235,7 +265,8 @@ jobs:
             distx/github_releases/* \
             distx/checksums.txt \
             distx/sqlite-dist-manifest.json \
-            distx/install.sh
+            distx/install.sh \
+            dist/ios-xcframework/*
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Install node
