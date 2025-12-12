@@ -28,7 +28,7 @@ jobs:
           name: sqlite3-fts5-html-linux-aarch64-extension
           path: dist/*
   build-macos-x86_64-extension:
-    runs-on: macos-13
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - run: make loadable
