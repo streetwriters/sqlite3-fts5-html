@@ -60,7 +60,7 @@ $(LEXBOR_LIB):
     if not exist deps mkdir deps
     git clone --depth 1 --branch $(LEXBOR_VERSION) https://github.com/lexbor/lexbor.git $(LEXBOR_PATH)
     cd $(LEXBOR_PATH) && mkdir build
-    cd $(LEXBOR_PATH)\build && cmake .. -DLEXBOR_BUILD_STATIC=ON -DLEXBOR_BUILD_SHARED=OFF -DLEXBOR_BUILD_EXAMPLES=OFF -DLEXBOR_BUILD_TESTS=OFF -DLEXBOR_OPTIMIZATION_LEVEL=-O2 -DCMAKE_GENERATOR_PLATFORM=$(ARCH)
+    cd $(LEXBOR_PATH)\build && cmake .. -DLEXBOR_BUILD_STATIC=ON -DLEXBOR_BUILD_SHARED=OFF -DLEXBOR_BUILD_EXAMPLES=OFF -DLEXBOR_BUILD_TESTS=OFF -DLEXBOR_OPTIMIZATION_LEVEL=-O2 -DCMAKE_GENERATOR_PLATFORM=$(ARCH) -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
     cd $(LEXBOR_PATH)\build && cmake --build . --target lexbor_static --config Release
     @echo Finding lexbor .lib...
     dir $(LEXBOR_PATH)\build\Release
