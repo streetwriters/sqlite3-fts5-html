@@ -262,6 +262,27 @@ jobs:
           curl -L https://github.com/asg017/sqlite-dist/releases/download/v0.0.1-alpha.19/sqlite-dist-x86_64-unknown-linux-gnu.tar.xz \
             | tar xfJ - --strip-components 1
       - run: ./sqlite-dist ./sqlite-dist.toml --input dist/ --output distx/ --version $(cat VERSION)
+      - name: Update repository URLs in package.json files
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+          for tarball in distx/npm/*.tar.gz; do
+            # Extract the tarball
+            tmpdir=$(mktemp -d)
+            tar -xzf "$tarball" -C "$tmpdir"
+            
+            # Find and update package.json
+            if [ -f "$tmpdir/package/package.json" ]; then
+              jq '.repository = {"type": "git", "url": "git+https://github.com/streetwriters/sqlite3-fts5-html.git"}' \
+                "$tmpdir/package/package.json" > "$tmpdir/package/package.json.tmp"
+              mv "$tmpdir/package/package.json.tmp" "$tmpdir/package/package.json"
+              
+              # Repack the tarball
+              (cd "$tmpdir" && tar -czf "$tarball" package/)
+            fi
+            
+            # Cleanup
+            rm -rf "$tmpdir"
+          done
       - run: |
           gh release upload --clobber ${{ github.ref_name }} \
             distx/amalgamation/* \
