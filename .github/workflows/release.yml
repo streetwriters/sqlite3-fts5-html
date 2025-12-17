@@ -285,5 +285,3 @@ jobs:
           npm publish --access public distx/npm/sqlite3-fts5-html-windows-x64.tar.gz
           npm publish --access public distx/npm/sqlite3-fts5-html-windows-arm64.tar.gz
           npm publish --access public distx/npm/sqlite3-fts5-html.tar.gz
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
