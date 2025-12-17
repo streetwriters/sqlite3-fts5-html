@@ -264,7 +264,6 @@ jobs:
       - run: ./sqlite-dist ./sqlite-dist.toml --input dist/ --output distx/ --version $(cat VERSION)
       - name: Update repository URLs in package.json files
         run: |
-          sudo apt-get update && sudo apt-get install -y jq
           for tarball in distx/npm/*.tar.gz; do
             # Extract the tarball
             tmpdir=$(mktemp -d)
@@ -276,8 +275,10 @@ jobs:
                 "$tmpdir/package/package.json" > "$tmpdir/package/package.json.tmp"
               mv "$tmpdir/package/package.json.tmp" "$tmpdir/package/package.json"
               
-              # Repack the tarball
-              (cd "$tmpdir" && tar -czf "$tarball" package/)
+              # Repack the tarball to a temporary location first
+              tmptar=$(mktemp)
+              (cd "$tmpdir" && tar -czf "$tmptar" package/)
+              mv "$tmptar" "$tarball"
             fi
             
             # Cleanup
