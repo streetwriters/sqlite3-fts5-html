@@ -275,7 +275,7 @@ jobs:
       - name: Install node
         uses: actions/setup-node@v3
         with:
-          node-version: "16"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
       - run: |
           npm publish --access public distx/npm/sqlite3-fts5-html-darwin-arm64.tar.gz
