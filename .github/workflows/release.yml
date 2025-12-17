@@ -4,6 +4,7 @@ on:
     types: [published]
 permissions:
   contents: read
+  id-token: write # Required for OIDC
 
 jobs:
   build-linux-x86_64-extension:
@@ -192,6 +193,7 @@ jobs:
       ]
     permissions:
       contents: write
+      id-token: write # Required for OIDC
     steps:
       - uses: actions/checkout@v4
 
