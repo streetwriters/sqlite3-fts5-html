@@ -45,14 +45,14 @@ $(SQLITE_AMALGAMATION_PATH):
     @echo Downloading SQLite amalgamation...
     powershell -Command "iwr -Uri $(SQLITE_AMALGAMATION_URL) -OutFile sqlite.zip"
     @echo Extracting SQLite amalgamation...
-    powershell -Command "Expand-Archive -Path sqlite.zip -DestinationPath deps/"
+    tar -xf sqlite.zip -C deps
     del sqlite.zip
 
 $(TCLSH_PATH):
     @echo Downloading Tcl/Tk...
     powershell -Command "iwr -Uri $(TCL_DOWNLOAD_URL) -OutFile tcl.zip"
     @echo Extracting Tcl/Tk...
-    powershell -Command "Expand-Archive -Path tcl.zip -DestinationPath deps/"
+    tar -xf tcl.zip -C deps
     del tcl.zip
 
 $(LEXBOR_LIB):

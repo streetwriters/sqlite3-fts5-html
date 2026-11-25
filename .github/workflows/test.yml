@@ -72,7 +72,7 @@ jobs:
               target: arm64-apple-ios,
               arch: arm64,
               sdk: iphoneos,
-              runner: macos-14,
+              runner: macos-15,
             },
             #{
             #  name: ios-x86_64,
@@ -85,14 +85,14 @@ jobs:
               target: arm64-apple-ios-simulator,
               arch: arm64,
               sdk: iphonesimulator,
-              runner: macos-14,
+              runner: macos-15,
             },
             {
               name: iossimulator-x86_64,
               target: x86_64-apple-ios-simulator,
               arch: x86_64,
               sdk: iphonesimulator,
-              runner: macos-14,
+              runner: macos-15,
             },
           ]
     steps:

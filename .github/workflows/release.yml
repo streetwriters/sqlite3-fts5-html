@@ -38,7 +38,7 @@ jobs:
           name: sqlite3-fts5-html-macos-x86_64-extension
           path: dist/*
   build-macos-aarch64-extension:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - run: make ARCH=arm64 loadable
@@ -47,7 +47,7 @@ jobs:
           name: sqlite3-fts5-html-macos-aarch64-extension
           path: dist/*
   build-windows-x86_64-extension:
-    runs-on: windows-2019
+    runs-on: windows-2022
     permissions:
       contents: write
     steps:
@@ -59,7 +59,7 @@ jobs:
           name: sqlite3-fts5-html-windows-x86_64-extension
           path: dist/*
   build-windows-aarch64-extension:
-    runs-on: windows-2019
+    runs-on: windows-2022
     permissions:
       contents: write
     steps:
@@ -117,7 +117,7 @@ jobs:
               target: arm64-apple-ios,
               arch: arm64,
               sdk: iphoneos,
-              runner: macos-14,
+              runner: macos-15,
             },
             #{
             #  name: ios-x86_64,
@@ -130,14 +130,14 @@ jobs:
               target: arm64-apple-ios-simulator,
               arch: arm64,
               sdk: iphonesimulator,
-              runner: macos-14,
+              runner: macos-15,
             },
             {
               name: iossimulator-x86_64,
               target: x86_64-apple-ios-simulator,
               arch: x86_64,
               sdk: iphonesimulator,
-              runner: macos-14,
+              runner: macos-15,
             },
           ]
     steps:
@@ -153,7 +153,7 @@ jobs:
           path: dist/*
 
   build-ios-xcframework:
-    runs-on: macos-14
+    runs-on: macos-15
     needs: build-ios-extensions
     steps:
       - uses: actions/checkout@v4
