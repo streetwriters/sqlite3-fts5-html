@@ -2348,6 +2348,11 @@ static inline int caseInsensitiveCompare(const char *a, const char *b, int n) {
     return 0;
 }
 
+/* Case-insensitive check that tag name `a` (of length n) is exactly `b` */
+static inline int tagNameEquals(const char *a, const char *b, int n) {
+    return caseInsensitiveCompare(a, b, n) == 0 && b[n] == '\0';
+}
+
 /* Initialize the HTML context for lexbor tokenization */
 static Fts5HtmlContext *fts5HtmlContextCreate(const char *html, int len) {
     Fts5HtmlContext *ctx = sqlite3_malloc(sizeof(*ctx));
@@ -2604,7 +2609,7 @@ static int isBlockElement(const char *tagName, int tagLen) {
     if (!tagName || tagLen <= 0) return 0;
 
     for (int i = 0; azBlockElements[i] != NULL; i++) {
-        if (caseInsensitiveCompare(tagName, azBlockElements[i], tagLen) == 0) {
+        if (tagNameEquals(tagName, azBlockElements[i], tagLen)) {
             return 1;
         }
     }
@@ -2663,7 +2668,7 @@ static lxb_html_token_t *tokenCallback(
     /* Check if we're entering an ignored tag */
     if (!is_close && !context->inIgnoreTag) {
         for (int i = 0; azIgnoreTags[i] != NULL; i++) {
-            if (caseInsensitiveCompare((const char *)name, azIgnoreTags[i], name_len) == 0) {
+            if (tagNameEquals((const char *)name, azIgnoreTags[i], name_len)) {
                 context->inIgnoreTag = 1;
                 context->currentTag = azIgnoreTags[i];
                 break;
@@ -2679,7 +2684,7 @@ static lxb_html_token_t *tokenCallback(
     }
     /* Check if we're exiting an ignored tag */
     else if (is_close && context->inIgnoreTag && context->currentTag) {
-        if (caseInsensitiveCompare((const char *)name, context->currentTag, name_len) == 0) {
+        if (tagNameEquals((const char *)name, context->currentTag, name_len)) {
             context->inIgnoreTag = 0;
             context->currentTag = NULL;
         }

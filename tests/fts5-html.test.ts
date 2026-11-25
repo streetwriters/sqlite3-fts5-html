@@ -156,6 +156,36 @@ describe("trigram", () => {
   }
 });
 
+describe("tag names", () => {
+  const db = initDatabase();
+  afterAll(() => db.close());
+
+  test("1.0", () => {
+    [
+      `CREATE VIRTUAL TABLE test USING fts5(x, y, tokenize = 'html trigram remove_diacritics 1');`,
+      `INSERT INTO test VALUES('a', '<p><s>Read books</s> and clean desk.</p>');`,
+      `INSERT INTO test VALUES('b', '<script>var x = "<s>ignored</s>";</script><p>after</p>');`,
+    ].forEach((stmt) => db.query(stmt).run());
+  });
+
+  const queries = {
+    read: 1,
+    books: 1,
+    ignored: 0,
+    after: 1,
+  };
+  let i = 1;
+  for (const query in queries) {
+    sqlTest(
+      db,
+      `1.${i++}.${query}`,
+      `SELECT count(*) as res FROM test WHERE test MATCH '${query}'`,
+      [],
+      [queries[query]],
+    );
+  }
+});
+
 describe("highlight", () => {
   const db = initDatabase();
   afterAll(() => db.close());
